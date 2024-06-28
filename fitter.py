@@ -10,6 +10,24 @@ import matplotlib.pyplot as plt
 import pybop
 import pybamm
 
+PulseDataset = collections.namedtuple("PulseDataset", ["ts", "vs", "socs", "currents"])
+
+BASE_PARAMETER_SET = {
+    "chemistry": "ecm",
+    "Initial temperature [K]": 25 + 273.15,
+    "Upper voltage cut-off [V]": 4.25,
+    "Lower voltage cut-off [V]": 2.5,
+    "Nominal cell capacity [A.h]": 5,
+    "Ambient temperature [K]": 25 + 273.15,
+    "Current function [A]": 5,
+    "R0 [Ohm]": 0.001,
+    "Cell thermal mass [J/K]": 1000,
+    "Cell-jig heat transfer coefficient [W/K]": 10,
+    "Jig thermal mass [J/K]": 500,
+    "Jig-air heat transfer coefficient [W/K]": 10,
+    "Entropic change [V/K]": 0.0004,
+}
+
 
 class ConstrainedThevenin(pybop.empirical.Thevenin):
     def __init__(self, tau_limits: list | np.ndarray, **model_kwargs):
@@ -44,24 +62,6 @@ class ConstrainedThevenin(pybop.empirical.Thevenin):
                 return True
 
 
-PulseDataset = collections.namedtuple("PulseDataset", ["ts", "vs", "socs", "currents"])
-
-BASE_PARAMETER_SET = {
-    "chemistry": "ecm",
-    "Initial temperature [K]": 25 + 273.15,
-    "Upper voltage cut-off [V]": 4.25,
-    "Lower voltage cut-off [V]": 2.5,
-    "Nominal cell capacity [A.h]": 5,
-    "Ambient temperature [K]": 25 + 273.15,
-    "Current function [A]": 5,
-    "R0 [Ohm]": 0.001,
-    "Cell thermal mass [J/K]": 1000,
-    "Cell-jig heat transfer coefficient [W/K]": 10,
-    "Jig thermal mass [J/K]": 500,
-    "Jig-air heat transfer coefficient [W/K]": 10,
-    "Entropic change [V/K]": 0.0004,
-}
-
 # Handle data
 
 
@@ -77,46 +77,6 @@ def coulomb_count(
     ret[0] = 0
     ret[1:] = np.diff(ts) * currents[:-1]
     return np.cumsum(ret) / (capacity * 3600) + initial_soc
-
-
-def get_discharge_pulse_data(
-    df: pd.DataFrame,
-    socs: np.ndarray,
-    ignore_rests: bool = False,
-    skip_initial_points: int = 0,
-) -> list[PulseDataset]:
-    end_of_rests = df[
-        df["Command"].eq("Pause") & df.shift(-1)["Command"].eq("Discharge")
-    ]
-    ret = []
-    for start, end in zip(end_of_rests.index, end_of_rests.index[1:]):
-        pulse_df = df.iloc[start:end]
-        if ignore_rests:
-            pulse_df = pulse_df[pulse_df["Command"].ne("Pause")]
-        soclist = socs[pulse_df.index]
-        dataset = PulseDataset(
-            pulse_df["~Time[s]"].to_numpy()[skip_initial_points:],
-            pulse_df["U[V]"].to_numpy()[skip_initial_points:],
-            soclist[skip_initial_points:],
-            -pulse_df["I[A]"].to_numpy()[skip_initial_points:],
-        )
-        ret.append(dataset)
-    return ret
-
-
-def get_ocvs(df: pd.DataFrame, socs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    # TODO instead, run from last data of each pulse, to avoid re-searching for end of pulses
-    end_of_rests = df[
-        df["Command"].eq("Pause") & df.shift(-1)["Command"].eq("Discharge")
-    ]
-    vs = end_of_rests["U[V]"].to_numpy()
-    # _, ax = plt.subplots()
-    # ax.plot(df["~Time[s]"], df["U[V]"])
-    # ax.scatter(end_of_rests["~Time[s]"], end_of_rests["U[V]"])
-    # plt.show()
-
-    # TODO THIS MISSES OUT THE VERY LAST PULSE!!!
-    return socs[end_of_rests.index], vs
 
 
 def build_ocv_interpolant(socs: np.ndarray, ocvs: np.ndarray) -> pybamm.Interpolant:
@@ -142,11 +102,8 @@ def get_model(
     base_params["Open-circuit voltage [V]"] = ocv
     for i in range(n_rc):
         base_params[f"Element-{i+1} initial overpotential [V]"] = 0
-        base_params[f"R{i+1} [Ohm]"] = 0.0002
+        base_params[f"R{i+1} [Ohm]"] = 0.0002  # These should be overwritten
         base_params[f"C{i+1} [F]"] = 1000
-    # ...and if there's issues, also...
-    # "R1 [Ohm]": 0.0002,
-    # "C1 [F]": 10000,
 
     model = ConstrainedThevenin(
         tau_limits, parameter_set=base_params, options={"number of rc elements": n_rc}
@@ -160,9 +117,9 @@ def get_fitting_params(
     r_bounds: list[float] = [
         1e-4,
         1e-1,
-    ],  ######### These set the bounds on R, C
+    ],
     c_bounds: list[float] = [1e2, 1e6],
-    r_variance: float = 1e-4,  ############ These two dictate how similar the next solution looks to the previous one
+    r_variance: float = 1e-4,
     c_variance: float = 1e3,
 ) -> list[pybop.Parameter]:
     to_fit = [
@@ -190,12 +147,18 @@ def get_fitting_params(
     return to_fit
 
 
+def print_params(params: np.ndarray):
+    print("R0: ", params[0])
+    for i, (ri, ci) in enumerate(zip(params[2::2], params[1::2])):
+        print(f"R{i+1}: {ri}, C{i+1}: {ci}, tau{i+1}: {ri*ci}")
+
+
 def fit_parameter_set(
     data: PulseDataset,
     model: pybop.empirical.Thevenin,
     fitting_parameters: list[pybop.Parameter],
     maxiter=50,
-    method=pybop.SNES,
+    method=pybop.XNES,
 ) -> np.ndarray:
     dataset = pybop.Dataset(
         {
@@ -209,44 +172,13 @@ def fit_parameter_set(
     optim = pybop.Optimisation(cost, optimiser=method)
     optim.set_max_iterations(maxiter)
     params, finalcost = optim.run()
-    print_params(params)
-    pybop.quick_plot(problem, parameter_values=params)
-    return params
-
-
-# Make usable
-
-
-def print_params(params: np.ndarray):
-    print("R0: ", params[0])
-    for i, (ri, ci) in enumerate(zip(params[2::2], params[1::2])):
-        print(f"R{i+1}: {ri}, C{i+1}: {ci}, tau{i+1}: {ri*ci}")
-
-
-def _get_header_line_number(filename):
-    with open(filename, "r", encoding="utf8", errors="ignore") as f:
-        csv_reader = csv.reader(f)
-        for i, row in enumerate(csv_reader):
-            if row[0][0] != "~":
-                return max(i - 1, 0)
-    return 0
-
-
-def import_data(filename: str) -> pd.DataFrame:
-    header_line = _get_header_line_number(filename)
-    # return pd.read_csv(filename, header=header_line, encoding_errors="ignore")
-    return pd.read_csv(
-        filename, header=header_line, sep="\s+", encoding="unicode_escape"
-    )
+    return params, problem, finalcost
 
 
 def parameterise(
-    capacity_Ah: float,
-    data_filename: str,
-    output_filename: str = None,
-    ignore_rests: bool = True,  ####################### If true, only fit to I!=0; recommended, for more robust fitting
-    skip_initial_points: int = 0,
-    base_parameters: dict = BASE_PARAMETER_SET,
+    datasets: PulseDataset | list[PulseDataset],
+    ocv_func,
+    base_parameters: dict,
     initial_taus_guess: list[float] = [1, 50],
     initial_rs_guess: list[float] = [1e-2] * 3,
     r_bounds: list[float] = [1e-4, 1e-1],
@@ -254,26 +186,19 @@ def parameterise(
     tau_limits: list[float] = None,
     r_variance: float = 1e-3,
     c_variance: float = 5e2,
-    maxiter=250,
+    maxiter=50,
     method=pybop.XNES,
+    verbose=True,
+    plot=True,
 ):
-    base_parameters["Cell capacity [A.h]"] = capacity_Ah
     n_rc = len(initial_taus_guess)
-    df = import_data(data_filename)
-
-    socs = coulomb_count(
-        df["~Time[s]"].to_numpy(),
-        df["I[A]"].to_numpy(),
-        capacity_Ah,
-    )
-    ocvdata_socs, ocvdata_vs = get_ocvs(df, socs)
-    ocv_func = build_ocv_interpolant(ocvdata_socs, ocvdata_vs)
-
-    ds_pulses = get_discharge_pulse_data(df, socs, ignore_rests, skip_initial_points)
+    if isinstance(datasets, PulseDataset):
+        datasets = [datasets]
 
     params = []
     average_socs = []
-    for i, (pulse, initial_soc) in enumerate(zip(ds_pulses, ocvdata_socs)):
+    for i, dataset in enumerate(datasets):
+        initial_soc = dataset.socs[0]
         model = get_model(initial_soc, ocv_func, base_parameters, n_rc, tau_limits)
         if len(params) == 0:
             prev_rs = initial_rs_guess
@@ -286,8 +211,15 @@ def parameterise(
         fitting_params = get_fitting_params(
             prev_rs, prev_cs, r_bounds, c_bounds, r_variance, c_variance
         )
-        params.append(fit_parameter_set(pulse, model, fitting_params, maxiter, method))
-        average_socs.append(np.mean(pulse.socs))
+        fitted, problem, finalcost = fit_parameter_set(dataset, model, fitting_params, maxiter, method)
+        params.append(fitted)
+        average_socs.append(np.mean(dataset.socs))
+
+        if verbose:
+            print_params(params)
+            print("Final cost: {finalcost}")
+        if plot:
+            pybop.quick_plot(problem, parameter_values=params)
 
     names = ["R0"]
     for i in range(n_rc):
@@ -296,18 +228,4 @@ def parameterise(
     ret_df = pd.DataFrame(params, columns=names)
     ret_df.insert(0, "SOC", average_socs)
 
-    ocv_df = pd.DataFrame.from_dict({"SOC": ocvdata_socs, "OCV": ocvdata_vs})
-    if output_filename is not None:
-        ret_df.to_csv(output_filename, index=False)
-        ocv_df.to_csv("ocv_" + output_filename, index=False)
-    return ret_df, ocv_df
-
-
-def main():
-    # TODO 1. parameterise in both ds and ch; 2. add current-draw to resulting LUT
-    # TODO strip off leading ~ s from BaSyTec files
-    pars = parameterise(5, "GITT.csv")
-
-
-if __name__ == "__main__":
-    main()
+    return ret_df
