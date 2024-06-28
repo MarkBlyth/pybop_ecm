@@ -216,10 +216,10 @@ def parameterise(
         average_socs.append(np.mean(dataset.socs))
 
         if verbose:
-            print_params(params)
-            print("Final cost: {finalcost}")
+            print_params(fitted)
+            print(f"Final cost: {finalcost}")
         if plot:
-            pybop.quick_plot(problem, parameter_values=params)
+            pybop.quick_plot(problem, parameter_values=fitted)
 
     names = ["R0"]
     for i in range(n_rc):
