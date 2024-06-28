@@ -17,8 +17,8 @@ PulseDataset = collections.namedtuple(
 BASE_PARAMETER_SET = {
     "chemistry": "ecm",
     "Initial temperature [K]": 25 + 273.15,
-    "Upper voltage cut-off [V]": 4.25,
-    "Lower voltage cut-off [V]": 2.5,
+    "Upper voltage cut-off [V]": np.inf,
+    "Lower voltage cut-off [V]": -np.inf,
     "Nominal cell capacity [A.h]": 5,
     "Ambient temperature [K]": 25 + 273.15,
     "Current function [A]": 5,
