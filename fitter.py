@@ -10,7 +10,9 @@ import matplotlib.pyplot as plt
 import pybop
 import pybamm
 
-PulseDataset = collections.namedtuple("PulseDataset", ["ts", "vs", "socs", "currents"])
+PulseDataset = collections.namedtuple(
+    "PulseDataset", ["ts", "vs", "socs", "currents"]
+)
 
 BASE_PARAMETER_SET = {
     "chemistry": "ecm",
@@ -30,15 +32,27 @@ BASE_PARAMETER_SET = {
 
 
 class ConstrainedThevenin(pybop.empirical.Thevenin):
-    def __init__(self, tau_limits: list | np.ndarray, **model_kwargs):
+    def __init__(self, tau_mins: list | np.ndarray = None, tau_maxs: list | np.ndarray = None, **model_kwargs):
         super().__init__(**model_kwargs)
-        if tau_limits is None:
-            tau_limits = [np.inf] * self.pybamm_model.options["number of rc elements"]
-        elif len(tau_limits) != self.pybamm_model.options["number of rc elements"]:
+        if tau_maxs is None:
+            tau_maxs = [np.inf] * self.pybamm_model.options[
+                "number of rc elements"
+            ]
+        if tau_mins is None:
+            tau_mins = [0] * self.pybamm_model.options[
+                "number of rc elements"
+            ]
+        elif (
+            len(tau_maxs)
+            != self.pybamm_model.options["number of rc elements"]
+            or len(tau_mins)
+            != self.pybamm_model.options["number of rc elements"]
+        ):
             raise ValueError(
                 "Length of tau constraints must match number of rc elements"
             )
-        self._tau_limits = tau_limits
+        self._tau_maxs = tau_maxs
+        self._tau_mins = tau_mins
 
     def _check_params(
         self,
@@ -55,7 +69,9 @@ class ConstrainedThevenin(pybop.empirical.Thevenin):
         while True:
             if f"C{i} [F]" in inputs and f"R{i} [Ohm]" in inputs:
                 tau = inputs[f"R{i} [Ohm]"] * inputs[f"C{i} [F]"]
-                if tau > self._tau_limits[i - 1]:
+                if tau > self._tau_maxs[i - 1]:
+                    return False
+                if tau < self._tau_mins[i - 1]:
                     return False
                 i += 1
             else:
@@ -79,7 +95,9 @@ def coulomb_count(
     return np.cumsum(ret) / (capacity * 3600) + initial_soc
 
 
-def build_ocv_interpolant(socs: np.ndarray, ocvs: np.ndarray) -> pybamm.Interpolant:
+def build_ocv_interpolant(
+    socs: np.ndarray, ocvs: np.ndarray
+) -> pybamm.Interpolant:
     idxs = np.argsort(socs)
 
     def ocv(soc):
@@ -96,7 +114,8 @@ def get_model(
     ocv,
     base_params,
     n_rc: int = 2,
-    tau_limits=None,
+    tau_maxs=None,
+    tau_mins=None,
 ) -> tuple[pybop.empirical.Thevenin, pybop.ParameterSet]:
     base_params["Initial SoC"] = initial_soc
     base_params["Open-circuit voltage [V]"] = ocv
@@ -106,7 +125,10 @@ def get_model(
         base_params[f"C{i+1} [F]"] = 1000
 
     model = ConstrainedThevenin(
-        tau_limits, parameter_set=base_params, options={"number of rc elements": n_rc}
+        tau_mins,
+        tau_maxs,
+        parameter_set=base_params,
+        options={"number of rc elements": n_rc},
     )
     return model
 
@@ -183,7 +205,8 @@ def parameterise(
     initial_rs_guess: list[float] = [1e-2] * 3,
     r_bounds: list[float] = [1e-4, 1e-1],
     c_bounds: list[float] = [1, 1e6],
-    tau_limits: list[float] = None,
+    tau_maxs: list[float] = None,
+    tau_mins: list[float] = None,
     r_variance: float = 1e-3,
     c_variance: float = 5e2,
     maxiter=50,
@@ -199,11 +222,14 @@ def parameterise(
     average_socs = []
     for i, dataset in enumerate(datasets):
         initial_soc = dataset.socs[0]
-        model = get_model(initial_soc, ocv_func, base_parameters, n_rc, tau_limits)
+        model = get_model(
+            initial_soc, ocv_func, base_parameters, n_rc, tau_maxs, tau_mins,
+        )
         if len(params) == 0:
             prev_rs = initial_rs_guess
             prev_cs = [
-                tau / r for tau, r in zip(initial_taus_guess, initial_rs_guess[1:])
+                tau / r
+                for tau, r in zip(initial_taus_guess, initial_rs_guess[1:])
             ]
         else:
             prev_rs = params[-1][::2]
@@ -211,7 +237,9 @@ def parameterise(
         fitting_params = get_fitting_params(
             prev_rs, prev_cs, r_bounds, c_bounds, r_variance, c_variance
         )
-        fitted, problem, finalcost = fit_parameter_set(dataset, model, fitting_params, maxiter, method)
+        fitted, problem, finalcost = fit_parameter_set(
+            dataset, model, fitting_params, maxiter, method
+        )
         params.append(fitted)
         average_socs.append(np.mean(dataset.socs))
 
