@@ -67,10 +67,10 @@ def import_neware(filename: str) -> pd.DataFrame:
 def get_pulse_data(
     df: pd.DataFrame,
     socs: np.ndarray,
-    ignore_rests: bool,
-    skip_initial_points: int,
     headers: Headers,
     direction: str,
+    ignore_rests: bool = False,
+    skip_initial_points: int = 0,
 ) -> list[PulseDataset]:
     if direction not in ["charge", "discharge"]:
         raise ValueError(
