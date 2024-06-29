@@ -78,8 +78,13 @@ class ConstrainedThevenin(pybop.empirical.Thevenin):
                 return True
 
 
-# Handle data
+def get_base_parameters(capacity_Ah: float) -> dict:
+    pars = copy.deepcopy(BASE_PARAMETER_SET)
+    pars["Cell capacity [A.h]"] = capacity_Ah
+    return pars
 
+
+# Handle data
 
 def coulomb_count(
     ts: np.ndarray,
