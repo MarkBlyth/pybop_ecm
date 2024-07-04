@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from __future__ import annotations
+import copy
 import collections
 import warnings
 import csv
@@ -149,6 +150,9 @@ def get_fitting_params(
     r_variance: float = 1e-4,
     c_variance: float = 1e3,
 ) -> list[pybop.Parameter]:
+    """
+    TODO check for consistency between initial taus guess, initial rs guess
+    """
     to_fit = [
         pybop.Parameter(
             "R0 [Ohm]",
