@@ -82,7 +82,7 @@ class ConstrainedThevenin(pybop.empirical.Thevenin):
 def get_base_parameters(capacity_Ah: float) -> dict:
     pars = copy.deepcopy(BASE_PARAMETER_SET)
     pars["Cell capacity [A.h]"] = capacity_Ah
-    return pars
+    return pybop.ParameterSet(params_dict=pars)
 
 
 # Handle data
