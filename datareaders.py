@@ -46,7 +46,6 @@ def import_data(filename: str, cycler: str) -> pd.DataFrame:
 
 def import_basytec(filename: str) -> pd.DataFrame:
     header_line = _get_basytec_header_line_number(filename)
-    # TODO relabel columns to some consistent naming convention??????
     return pd.read_csv(  ############## TODO HAVE ENCODING OPTION (tabs / comma separators)
         filename, header=header_line, sep="\s+", encoding="unicode_escape"
     )
@@ -54,7 +53,6 @@ def import_basytec(filename: str) -> pd.DataFrame:
 
 def import_neware(filename: str) -> pd.DataFrame:
     df = pd.read_csv(filename, encoding_errors="ignore")
-    # TODO relabel columns to some consistent naming convention??????
     seconds = (
         df[NewareHeaders.time]
         .str.split(":")
@@ -79,6 +77,9 @@ def get_pulse_data(
     active_command = (
         headers.charging if direction == "charge" else headers.discharging
     )
+    wrong_command = (
+        headers.discharging if direction == "charge" else headers.charging
+    )
     warnings.warn("This pulse-getter may miss out the last pulse in a GITT")
 
     end_of_rests = df[
@@ -88,13 +89,15 @@ def get_pulse_data(
     ret = []
     for start, end in zip(end_of_rests.index, end_of_rests.index[1:]):
         pulse_df = df.iloc[start:end]
+        if any(pulse_df[headers.command].eq(wrong_command)):
+            continue
         if ignore_rests:
             pulse_df = pulse_df[
                 pulse_df[headers.command].ne(headers.resting)
             ]
         soclist = socs[pulse_df.index]
 
-        unique_times = np.r_[True, np.diff(pulse_df["~Time[s]"]) != 0]
+        unique_times = np.r_[True, np.diff(pulse_df[headers.time]) != 0]
         if not all(unique_times):
             warnings.warn(
                 f"Skipping double-counted time-sample \n{pulse_df[np.logical_not(unique_times)]}"
