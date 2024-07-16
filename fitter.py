@@ -7,6 +7,7 @@ import warnings
 import csv
 import numpy as np
 import pandas as pd
+import scipy.optimize
 import matplotlib.pyplot as plt
 import pybop
 import pybamm
@@ -33,7 +34,12 @@ BASE_PARAMETER_SET = {
 
 
 class ConstrainedThevenin(pybop.empirical.Thevenin):
-    def __init__(self, tau_mins: list | np.ndarray = None, tau_maxs: list | np.ndarray = None, **model_kwargs):
+    def __init__(
+        self,
+        tau_mins: list | np.ndarray = None,
+        tau_maxs: list | np.ndarray = None,
+        **model_kwargs,
+    ):
         super().__init__(**model_kwargs)
         if tau_maxs is None:
             tau_maxs = [np.inf] * self.pybamm_model.options[
@@ -86,6 +92,7 @@ def get_base_parameters(capacity_Ah: float) -> dict:
 
 
 # Handle data
+
 
 def coulomb_count(
     ts: np.ndarray,
@@ -147,31 +154,47 @@ def get_fitting_params(
         1e-1,
     ],
     c_bounds: list[float] = [1e2, 1e6],
-    r_variance: float = 1e-4,
-    c_variance: float = 1e3,
+    sigma_r: float = None,
+    sigma_c: float = None,
 ) -> list[pybop.Parameter]:
     """
     TODO check for consistency between initial taus guess, initial rs guess
     """
+    if sigma_r:
+        prior_r = pybop.Gaussian(prev_rs[0], sigma_r)
+    else:
+        prior_r = None
     to_fit = [
         pybop.Parameter(
             "R0 [Ohm]",
-            prior=pybop.Gaussian(prev_rs[0], r_variance),
+            initial_value=prev_rs[0],
+            prior=prior_r,
             bounds=r_bounds,
         )
     ]
     for i, (prev_r, prev_c) in enumerate(zip(prev_rs[1:], prev_cs)):
+        if sigma_c:
+            prior_c = pybop.Gaussian(prev_c, sigma_c)
+        else:
+            prior_c = None
         to_fit.append(
             pybop.Parameter(
                 f"C{i+1} [F]",
-                prior=pybop.Gaussian(prev_c, c_variance),
+                initial_value=prev_c,
+                prior=prior_c,
                 bounds=c_bounds,
             )
         )
+
+        if sigma_r:
+            prior_r = pybop.Gaussian(prev_r, sigma_r)
+        else:
+            prior_r = None
         to_fit.append(
             pybop.Parameter(
                 f"R{i+1} [Ohm]",
-                prior=pybop.Gaussian(prev_r, r_variance),
+                initial_value=prev_r,
+                prior=prior_r,
                 bounds=r_bounds,
             )
         )
@@ -190,6 +213,7 @@ def fit_parameter_set(
     fitting_parameters: list[pybop.Parameter],
     maxiter=50,
     method=pybop.XNES,
+    scipy_constraints=None,
 ) -> np.ndarray:
     dataset = pybop.Dataset(
         {
@@ -200,10 +224,52 @@ def fit_parameter_set(
     )
     problem = pybop.FittingProblem(model, fitting_parameters, dataset)
     cost = pybop.SumSquaredError(problem)
-    optim = pybop.Optimisation(cost, optimiser=method)
-    optim.set_max_iterations(maxiter)
+    if scipy_constraints:
+        constraints, bounds = scipy_constraints
+        optim = pybop.SciPyMinimize(
+            cost,
+            method="trust-constr",
+            constraints=constraints,
+            bounds=bounds,
+        )
+    else:
+        optim = pybop.Optimisation(cost, optimiser=method)
+        optim.set_max_iterations(maxiter)
     params, finalcost = optim.run()
     return params, problem, finalcost
+
+
+def get_scipy_constraints(
+    n_rc, method, tau_mins, tau_maxs, r_bounds, c_bounds
+):
+    if method in ["COBYLA", "COBYQA", "SLSQP", "trust-constr"]:
+        # Nonlinear constraints on tau
+        def calculate_taus(x):
+            return x[1::2] * x[2::2]
+
+        constraint = scipy.optimize.NonlinearConstraint(
+            calculate_taus,
+            tau_mins,
+            tau_maxs,
+        )
+    else:
+        constraint = None
+
+    # Where R0, Ri, Ci lie in the list of fitted parameters
+    # 0, 2, 4, 6, ...
+    rs_idx = np.arange(n_rc + 1) * 2
+    # 1, 3, 5, ...
+    cs_idx = np.arange(n_rc) * 2 + 1
+    # Bounds arrays, to be filled
+    lb = np.zeros(2 * n_rc + 1)
+    ub = np.zeros(2 * n_rc + 1)
+    # Place Ri, Ci bounds into their respective places of the bounds arrays
+    lb[rs_idx] = r_bounds[0]
+    lb[cs_idx] = c_bounds[0]
+    ub[rs_idx] = r_bounds[1]
+    ub[cs_idx] = c_bounds[1]
+    bounds = scipy.optimize.Bounds(lb, ub)
+    return constraint, bounds
 
 
 def parameterise(
@@ -214,10 +280,10 @@ def parameterise(
     initial_rs_guess: list[float] = [1e-2] * 3,
     r_bounds: list[float] = [1e-4, 1e-1],
     c_bounds: list[float] = [1, 1e6],
-    tau_maxs: list[float] = None,
     tau_mins: list[float] = None,
-    r_variance: float = 1e-3,
-    c_variance: float = 5e2,
+    tau_maxs: list[float] = None,
+    sigma_r: float = None,
+    sigma_c: float = None,
     maxiter=50,
     method=pybop.XNES,
     verbose=True,
@@ -232,7 +298,12 @@ def parameterise(
     for i, dataset in enumerate(datasets):
         initial_soc = dataset.socs[0]
         model = get_model(
-            initial_soc, ocv_func, base_parameters, n_rc, tau_maxs, tau_mins,
+            initial_soc,
+            ocv_func,
+            base_parameters,
+            n_rc,
+            tau_maxs,
+            tau_mins,
         )
         if len(params) == 0:
             prev_rs = initial_rs_guess
@@ -243,11 +314,22 @@ def parameterise(
         else:
             prev_rs = params[-1][::2]
             prev_cs = params[-1][1::2]
+        if isinstance(method, str):
+            scipy_constraints = get_scipy_constraints(
+                n_rc, method, tau_mins, tau_maxs, r_bounds, c_bounds
+            )
+        else:
+            scipy_constraints = None
         fitting_params = get_fitting_params(
-            prev_rs, prev_cs, r_bounds, c_bounds, r_variance, c_variance
+            prev_rs, prev_cs, r_bounds, c_bounds, sigma_r, sigma_c
         )
         fitted, problem, finalcost = fit_parameter_set(
-            dataset, model, fitting_params, maxiter, method
+            dataset,
+            model,
+            fitting_params,
+            maxiter,
+            method,
+            scipy_constraints,
         )
         params.append(fitted)
         average_socs.append(np.mean(dataset.socs))
@@ -256,7 +338,7 @@ def parameterise(
             print_params(fitted)
             print(f"Final cost: {finalcost}")
         if plot:
-            pybop.quick_plot(problem, parameter_values=fitted)
+            pybop.quick_plot(problem, problem_inputs=fitted)
 
     names = ["R0"]
     for i in range(n_rc):
