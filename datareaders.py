@@ -21,8 +21,8 @@ BasytecHeaders = Headers(
     "Command", "~Time[s]", "I[A]", "U[V]", "Charge", "Discharge", "Pause"
 )
 NewareHeaders = Headers(
-    "Step Type", "~Time[s]", "I[A]", "U[V]", "CC Chg", "CC DChg", "Rest"
-)  #### TODO check time; I; V
+    "Step Type", "Total Time", "Current(A)", "Voltage(V)", "CC Chg", "CC DChg", "Rest"
+)
 
 
 def _get_basytec_header_line_number(filename):
@@ -52,7 +52,10 @@ def import_basytec(filename: str) -> pd.DataFrame:
 
 
 def import_neware(filename: str) -> pd.DataFrame:
-    df = pd.read_csv(filename, encoding_errors="ignore")
+    try:
+        df = pd.read_csv(filename, encoding_errors="ignore")
+    except pd.errors.ParserError:
+        df = pd.read_excel(filename, sheet_name="record")
     seconds = (
         df[NewareHeaders.time]
         .str.split(":")
@@ -106,10 +109,10 @@ def get_pulse_data(
             soclist = soclist[unique_times]
 
         dataset = PulseDataset(
-            pulse_df["~Time[s]"].to_numpy()[skip_initial_points:],
-            pulse_df["U[V]"].to_numpy()[skip_initial_points:],
+            pulse_df[headers.time].to_numpy()[skip_initial_points:],
+            pulse_df[headers.voltage].to_numpy()[skip_initial_points:],
             soclist[skip_initial_points:],
-            -pulse_df["I[A]"].to_numpy()[skip_initial_points:],
+            -pulse_df[headers.current].to_numpy()[skip_initial_points:],
         )
         ret.append(dataset)
     return ret
