@@ -30,6 +30,7 @@ BASE_PARAMETER_SET = {
     "Jig thermal mass [J/K]": 500,
     "Jig-air heat transfer coefficient [W/K]": 10,
     "Entropic change [V/K]": 0.0004,
+    "Initial SoC": None,
 }
 
 
@@ -88,7 +89,7 @@ class ConstrainedThevenin(pybop.empirical.Thevenin):
 def get_base_parameters(capacity_Ah: float) -> dict:
     pars = copy.deepcopy(BASE_PARAMETER_SET)
     pars["Cell capacity [A.h]"] = capacity_Ah
-    return pybop.ParameterSet(params_dict=pars)
+    return pars
 
 
 # Handle data
@@ -141,7 +142,7 @@ def get_model(
     model = ConstrainedThevenin(
         tau_mins,
         tau_maxs,
-        parameter_set=base_params,
+        parameter_set=pybop.ParameterSet(params_dict=base_params),
         solver=solver,
         options={"number of rc elements": n_rc},
     )

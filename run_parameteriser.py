@@ -55,42 +55,52 @@ def main():
         filename_stem = "." + filename.split(".")[-2]
         print("Starting ", filename)
 
-        df = datareaders.import_basytec("GITT.csv")
+        df = datareaders.import_basytec(filename)
 
-        socs = fitter.coulomb_count(df[datareaders.BasytecHeaders.time], df[datareaders.BasytecHeaders.current], capacity_Ah, 1)
-        pulses = datareaders.get_pulse_data(df, socs, datareaders.BasytecHeaders, "charge")
+        socs = fitter.coulomb_count(
+            df[datareaders.BasytecHeaders.time],
+            df[datareaders.BasytecHeaders.current],
+            capacity_Ah,
+            1,
+        )
+
+        pulses = datareaders.get_pulse_data(
+            df, socs, datareaders.BasytecHeaders, "charge"
+        )
         ocv_socs, ocv_vs = datareaders.get_ocvs_from_pulsedataset_list(pulses)
-        warnings.warn("Adding fictitious OCV points outside cell operating voltages, for interpolator stability")
+        warnings.warn(
+            "Adding fictitious OCV points outside cell operating voltages, for interpolator stability"
+        )
         ocv_socs = np.r_[-0.01, ocv_socs, 1.01]
         ocv_vs = np.r_[2.49, ocv_vs, 4.21]
         ocv_func = fitter.build_ocv_interpolant(ocv_socs, ocv_vs)
 
-        pulses = datareaders.get_pulse_data(df, socs, datareaders.BasytecHeaders, "charge", ignore_rests=True)
+        pulses = datareaders.get_pulse_data(
+            df, socs, datareaders.BasytecHeaders, "charge", ignore_rests=True, skip_initial_points=2,
+        )
 
         pars_df = fitter.parameterise(
             pulses,
             ocv_func,
             base_params,
-            initial_taus_guess=[1, 20],
-            tau_mins=[0, 0],
-            tau_maxs=[30, 30],
-            r_bounds = [1e-4, 1e-1],
-            c_bounds=[1, 1e6],
-            r_variance=1e-3,
-            c_variance=50,
-            initial_rs_guess = [1e-2]*3,
+            initial_taus_guess=[6, 13],
+            tau_mins=[1, 1],
+            tau_maxs=[200, 200],
+            r_bounds=[0, 1e-1],
+            c_bounds=[1e1, 1e6],
+            r_variance=1e-5,
+            c_variance=1e-2,
+            initial_rs_guess=[0.005, 0.01, 0.01],
             maxiter=1000,
             method=pybop.XNES,
-            plot=False,
+            plot=True,
         )
-        pars_df["Temperature_degC"] = temperature
         pars_df["Temperature_degC"] = temperature
         pars_df["Current_A"] = capacity_Ah * c_rate
         ocv_df = pd.DataFrame.from_dict({"SOC": ocv_socs, "OCV[V]": ocv_vs})
 
-        filename_stem = filename.split(".")[0]
-        ocv_df.to_csv(filename_stem + "_ocv.csv", index=False)
-        pars_df.to_csv(filename_stem + "_pars.csv", index=False)
+        ocv_df.to_csv(str(temperature) + "degC_ocv.csv", index=False)
+        pars_df.to_csv(str(temperature) + "degC_pars.csv", index=False)
 
         parameter_sets.append(pars_df)
     df = pd.concat(parameter_sets)
