@@ -137,10 +137,12 @@ def get_model(
         base_params[f"R{i+1} [Ohm]"] = 0.0002  # These should be overwritten
         base_params[f"C{i+1} [F]"] = 1000
 
+    solver = pybamm.ScipySolver(extra_options={"max_step": 10})
     model = ConstrainedThevenin(
         tau_mins,
         tau_maxs,
         parameter_set=base_params,
+        solver=solver,
         options={"number of rc elements": n_rc},
     )
     return model
@@ -228,7 +230,7 @@ def fit_parameter_set(
         constraints, bounds = scipy_constraints
         optim = pybop.SciPyMinimize(
             cost,
-            method="trust-constr",
+            method=method,
             constraints=constraints,
             bounds=bounds,
         )
