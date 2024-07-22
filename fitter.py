@@ -143,13 +143,20 @@ def get_model(
         solver = pybamm.ScipySolver(extra_options={"max_step": integrator_maxstep})
     else:
         solver = None
-    model = ConstrainedThevenin(
-        tau_mins,
-        tau_maxs,
-        parameter_set=pybop.ParameterSet(params_dict=base_params),
-        solver=solver,
-        options={"number of rc elements": n_rc},
-    )
+    if tau_maxs is None and tau_mins is None:
+        model = pybop.empirical.Thevenin(
+            parameter_set=pybop.ParameterSet(params_dict=base_params),
+            solver=solver,
+            options={"number of rc elements": n_rc},
+        )
+    else:
+        model = ConstrainedThevenin(
+            tau_mins,
+            tau_maxs,
+            parameter_set=pybop.ParameterSet(params_dict=base_params),
+            solver=solver,
+            options={"number of rc elements": n_rc},
+        )
     return model
 
 
@@ -305,15 +312,27 @@ def parameterise(
     average_socs = []
     for i, dataset in enumerate(datasets):
         initial_soc = dataset.socs[0]
-        model = get_model(
-            initial_soc,
-            ocv_func,
-            base_parameters,
-            n_rc,
-            tau_maxs,
-            tau_mins,
-            integrator_maxstep,
-        )
+
+        if isinstance(method, str):
+            # Don't get model to apply constraints with constrained optimisers
+            model = get_model(
+                    initial_soc,
+                    ocv_func,
+                    base_parameters,
+                    n_rc,
+                    integrator_maxstep=integrator_maxstep,
+                )
+        else:
+            model = get_model(
+                initial_soc,
+                ocv_func,
+                base_parameters,
+                n_rc,
+                tau_maxs,
+                tau_mins,
+                integrator_maxstep,
+            )
+
         if len(params) == 0:
             prev_rs = initial_rs_guess
             prev_cs = [
@@ -323,12 +342,14 @@ def parameterise(
         else:
             prev_rs = params[-1][::2]
             prev_cs = params[-1][1::2]
+
         if isinstance(method, str):
             scipy_constraints = get_scipy_constraints(
                 n_rc, method, tau_mins, tau_maxs, r_bounds, c_bounds
             )
         else:
             scipy_constraints = None
+
         fitting_params = get_fitting_params(
             prev_rs, prev_cs, r_bounds, c_bounds, sigma_r, sigma_c
         )
