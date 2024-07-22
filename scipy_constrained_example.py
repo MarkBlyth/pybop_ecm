@@ -20,11 +20,12 @@ def main():
         df[datareaders.BasytecHeaders.time],
         df[datareaders.BasytecHeaders.current],
         capacity_Ah,
-        1,
+        0.98,
     )
     pulses = datareaders.get_pulse_data(
-        df, socs, datareaders.NewareHeaders, "discharge"
-    )
+        df, socs, datareaders.NewareHeaders, "switch"
+    )[1: -1]
+
     ocv_socs, ocv_vs = datareaders.get_ocvs_from_pulsedataset_list(pulses)
     warnings.warn(
         "Adding fictitious OCV points outside cell operating voltages, for interpolator stability"
@@ -32,10 +33,6 @@ def main():
     ocv_socs = np.r_[-0.01, ocv_socs, 1.01]
     ocv_vs = np.r_[2.99, ocv_vs, 4.21]
     ocv_func = fitter.build_ocv_interpolant(ocv_socs, ocv_vs)
-
-    pulses = datareaders.get_pulse_data(
-        df, socs, datareaders.NewareHeaders, "discharge", ignore_rests=True,
-    )
 
     pars_df = fitter.parameterise(
         pulses,
@@ -49,8 +46,8 @@ def main():
         sigma_r=0.01,
         sigma_c=500,
         initial_rs_guess=[0.05, 0.01, 0.01],
-        maxiter=1000,
-        method="trust-constr",
+        method="SLSQP",
+        integrator_maxstep=10,
         plot=True,
     )
     pars_df["Temperature_degC"] = 25
