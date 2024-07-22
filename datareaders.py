@@ -70,9 +70,9 @@ def get_pulse_data(
     ignore_rests: bool = False,
     skip_initial_points: int = 0,
 ) -> list[PulseDataset]:
-    if direction not in ["charge", "discharge"]:
+    if direction not in ["charge", "discharge", "switch"]:
         raise ValueError(
-            f"direction must be charge or discharge; received {direction}"
+            f"direction must be charge, discharge, or switch; received {direction}"
         )
     active_command = (
         headers.charging if direction == "charge" else headers.discharging
@@ -90,6 +90,11 @@ def get_pulse_data(
     for start, end in zip(end_of_rests.index, end_of_rests.index[1:]):
         pulse_df = df.iloc[start:end]
         if any(pulse_df[headers.command].eq(wrong_command)):
+            if direction != "switch":
+                continue
+            if not any(pulse_df[headers.command].eq(active_command)):
+                continue
+        elif direction == "switch":
             continue
         if ignore_rests:
             pulse_df = pulse_df[
