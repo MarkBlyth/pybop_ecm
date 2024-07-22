@@ -130,6 +130,7 @@ def get_model(
     n_rc: int = 2,
     tau_maxs=None,
     tau_mins=None,
+    integrator_maxstep=None,
 ) -> tuple[pybop.empirical.Thevenin, pybop.ParameterSet]:
     base_params["Initial SoC"] = initial_soc
     base_params["Open-circuit voltage [V]"] = ocv
@@ -138,7 +139,10 @@ def get_model(
         base_params[f"R{i+1} [Ohm]"] = 0.0002  # These should be overwritten
         base_params[f"C{i+1} [F]"] = 1000
 
-    solver = pybamm.ScipySolver(extra_options={"max_step": 10})
+    if integrator_maxstep:
+        solver = pybamm.ScipySolver(extra_options={"max_step": integrator_maxstep})
+    else:
+        solver = None
     model = ConstrainedThevenin(
         tau_mins,
         tau_maxs,
@@ -288,6 +292,7 @@ def parameterise(
     sigma_r: float = None,
     sigma_c: float = None,
     maxiter=50,
+    integrator_maxstep=None,
     method=pybop.XNES,
     verbose=True,
     plot=True,
@@ -307,6 +312,7 @@ def parameterise(
             n_rc,
             tau_maxs,
             tau_mins,
+            integrator_maxstep,
         )
         if len(params) == 0:
             prev_rs = initial_rs_guess
