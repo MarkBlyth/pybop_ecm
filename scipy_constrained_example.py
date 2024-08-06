@@ -14,11 +14,11 @@ def main():
     capacity_Ah = 2.16
     base_params = fitter.get_base_parameters(capacity_Ah)
 
-    df = datareaders.import_neware("MLP001.csv")
+    df = datareaders.import_neware("MLP001.xlsx")
 
     socs = fitter.coulomb_count(
-        df[datareaders.BasytecHeaders.time],
-        df[datareaders.BasytecHeaders.current],
+        df[datareaders.NewareHeaders.time],
+        df[datareaders.NewareHeaders.current],
         capacity_Ah,
         0.98,
     )
@@ -41,10 +41,6 @@ def main():
         initial_taus_guess=[10, 70],
         tau_mins=[0, 0],
         tau_maxs=[25, 160],
-        r_bounds=[5e-3, 1e-1],
-        c_bounds=[1, 1e6],
-        sigma_r=0.01,
-        sigma_c=500,
         initial_rs_guess=[0.05, 0.01, 0.01],
         method="SLSQP",
         integrator_maxstep=10,
