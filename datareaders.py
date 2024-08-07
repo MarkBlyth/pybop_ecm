@@ -113,8 +113,9 @@ def get_pulse_data(
             pulse_df = pulse_df[unique_times]
             soclist = soclist[unique_times]
 
+        ts = pulse_df[headers.time].to_numpy()[skip_initial_points:]
         dataset = PulseDataset(
-            pulse_df[headers.time].to_numpy()[skip_initial_points:],
+            ts - ts[0],
             pulse_df[headers.voltage].to_numpy()[skip_initial_points:],
             soclist[skip_initial_points:],
             -pulse_df[headers.current].to_numpy()[skip_initial_points:],
@@ -146,7 +147,9 @@ def get_ocvs_from_df(
 def get_ocvs_from_pulsedataset_list(
     pulses: list[PulseDataset],
 ) -> tuple[np.ndarray, np.ndarray]:
-    socs, vs = np.zeros(len(pulses)), np.zeros(len(pulses))
+    socs, vs = np.zeros(len(pulses) + 1), np.zeros(len(pulses) + 1)
+    socs[0] = pulses[0].socs[0]
+    vs[0] = pulses[0].vs[0]
     for i, pulse in enumerate(pulses):
         is_resting = pulse.currents == 0
 
@@ -167,7 +170,7 @@ def get_ocvs_from_pulsedataset_list(
         rest_soc = pulse.socs[out][-1]
         rest_v = pulse.vs[out][-1]
 
-        socs[i] = rest_soc
-        vs[i] = rest_v
+        socs[i+1] = rest_soc
+        vs[i+1] = rest_v
     ordering = np.argsort(socs)
     return socs[ordering], vs[ordering]
