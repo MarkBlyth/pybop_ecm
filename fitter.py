@@ -239,13 +239,17 @@ def fit_parameter_set(
     else:
         optim = pybop.Optimisation(cost, optimiser=method)
         optim.set_max_iterations(maxiter)
-    params, finalcost = optim.run()
+    try:
+        params, finalcost = optim.run()
+    except ValueError as e:
+        # Typically happens when a point is requested outside of the
+        # specified bounds
+        warnings.warn(f"Something went wrong: {e}")
+        return None, None, None
     return params, problem, finalcost
 
 
-def get_scipy_constraints(
-    n_rc, method, tau_mins, tau_maxs, r_bounds, c_bounds
-):
+def get_scipy_constraints(n_rc, method, tau_mins, tau_maxs, r_bounds, c_bounds):
     if method in ["COBYLA", "COBYQA", "SLSQP", "trust-constr"]:
         # Nonlinear constraints on tau
         def calculate_taus(x):
@@ -272,7 +276,7 @@ def get_scipy_constraints(
     lb[cs_idx] = c_bounds[0]
     ub[rs_idx] = r_bounds[1]
     ub[cs_idx] = c_bounds[1]
-    bounds = scipy.optimize.Bounds(lb, ub)
+    bounds = scipy.optimize.Bounds(lb, ub, True)
     return constraint, bounds
 
 
@@ -282,8 +286,8 @@ def parameterise(
     base_parameters: dict,
     initial_taus_guess: list[float] = [1, 50],
     initial_rs_guess: list[float] = [1e-2] * 3,
-    r_bounds: list[float] = [1e-4, 1e-1],
-    c_bounds: list[float] = [1, 1e6],
+    r_bounds: list[float] = [0, np.inf],
+    c_bounds: list[float] = [0, np.inf],
     tau_mins: list[float] = None,
     tau_maxs: list[float] = None,
     sigma_r: float = None,
@@ -350,6 +354,8 @@ def parameterise(
             method,
             scipy_constraints,
         )
+        if fitted is None:
+            continue
         params.append(fitted)
         average_socs.append(np.mean(dataset.socs))
 
