@@ -151,8 +151,8 @@ def get_model(
 
 
 def get_fitting_params(
-    prev_rs: np.ndarray,
-    prev_cs: np.ndarray,
+    prev_rs: list[float],
+    prev_cs: list[float],
     r_bounds: list[float] = [
         1e-4,
         1e-1,
@@ -218,7 +218,7 @@ def fit_parameter_set(
     maxiter=50,
     method=pybop.XNES,
     scipy_constraints=None,
-) -> np.ndarray:
+) -> tuple[np.ndarray, pybop.FittingProblem, float]:
     dataset = pybop.Dataset(
         {
             "Time [s]": data.ts,
