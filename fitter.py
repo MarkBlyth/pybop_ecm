@@ -12,9 +12,7 @@ import matplotlib.pyplot as plt
 import pybop
 import pybamm
 
-PulseDataset = collections.namedtuple(
-    "PulseDataset", ["ts", "vs", "socs", "currents"]
-)
+PulseDataset = collections.namedtuple("PulseDataset", ["ts", "vs", "socs", "currents"])
 
 BASE_PARAMETER_SET = {
     "chemistry": "ecm",
@@ -43,18 +41,12 @@ class ConstrainedThevenin(pybop.empirical.Thevenin):
     ):
         super().__init__(**model_kwargs)
         if tau_maxs is None:
-            tau_maxs = [np.inf] * self.pybamm_model.options[
-                "number of rc elements"
-            ]
+            tau_maxs = [np.inf] * self.pybamm_model.options["number of rc elements"]
         if tau_mins is None:
-            tau_mins = [0] * self.pybamm_model.options[
-                "number of rc elements"
-            ]
+            tau_mins = [0] * self.pybamm_model.options["number of rc elements"]
         elif (
-            len(tau_maxs)
-            != self.pybamm_model.options["number of rc elements"]
-            or len(tau_mins)
-            != self.pybamm_model.options["number of rc elements"]
+            len(tau_maxs) != self.pybamm_model.options["number of rc elements"]
+            or len(tau_mins) != self.pybamm_model.options["number of rc elements"]
         ):
             raise ValueError(
                 "Length of tau constraints must match number of rc elements"
@@ -109,9 +101,7 @@ def coulomb_count(
     return np.cumsum(ret) / (capacity * 3600) + initial_soc
 
 
-def build_ocv_interpolant(
-    socs: np.ndarray, ocvs: np.ndarray
-) -> pybamm.Interpolant:
+def build_ocv_interpolant(socs: np.ndarray, ocvs: np.ndarray) -> pybamm.Interpolant:
     idxs = np.argsort(socs)
 
     def ocv(soc):
@@ -316,12 +306,12 @@ def parameterise(
         if isinstance(method, str):
             # Don't get model to apply constraints with constrained optimisers
             model = get_model(
-                    initial_soc,
-                    ocv_func,
-                    base_parameters,
-                    n_rc,
-                    integrator_maxstep=integrator_maxstep,
-                )
+                initial_soc,
+                ocv_func,
+                base_parameters,
+                n_rc,
+                integrator_maxstep=integrator_maxstep,
+            )
         else:
             model = get_model(
                 initial_soc,
@@ -336,8 +326,7 @@ def parameterise(
         if len(params) == 0:
             prev_rs = initial_rs_guess
             prev_cs = [
-                tau / r
-                for tau, r in zip(initial_taus_guess, initial_rs_guess[1:])
+                tau / r for tau, r in zip(initial_taus_guess, initial_rs_guess[1:])
             ]
         else:
             prev_rs = params[-1][::2]
