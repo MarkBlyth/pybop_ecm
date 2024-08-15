@@ -146,29 +146,38 @@ def get_ocvs_from_df(
 
 def get_ocvs_from_pulsedataset_list(
     pulses: list[PulseDataset],
+    method: str = "rested",
 ) -> tuple[np.ndarray, np.ndarray]:
+    if method not in ["rested", "final"]:
+        raise ValueError("Method must be rested or final")
     socs, vs = np.zeros(len(pulses) + 1), np.zeros(len(pulses) + 1)
     socs[0] = pulses[0].socs[0]
     vs[0] = pulses[0].vs[0]
     for i, pulse in enumerate(pulses):
         is_resting = pulse.currents == 0
+        if method == "rested":
+            # Find the longest continuous set of rests, and take the
+            # most rested result as OCV
+            # https://stackoverflow.com/questions/56301970/how-can-i-return-the-longest-continuous-occurrence-of-true-in-boolean-and-rep
+            bools = np.r_[False, is_resting, False]
+            # Get indices of group shifts
+            shiftpoints = np.flatnonzero(bools[:-1] != bools[1:])
+            # Get group lengths and hence the max index group
+            groupsizes = (shiftpoints[1::2] - shiftpoints[::2]).argmax()
+            # Initialize array and assign only the largest True island as True.
+            out = np.zeros_like(is_resting)
+            out[
+                shiftpoints[2 * groupsizes] : shiftpoints[2 * groupsizes + 1]
+            ] = 1
 
-        # Find the longest continuous set of rests, to make sure we're picking out the right data
-        # https://stackoverflow.com/questions/56301970/how-can-i-return-the-longest-continuous-occurrence-of-true-in-boolean-and-rep
-        bools = np.r_[False, is_resting, False]
-        # Get indices of group shifts
-        shiftpoints = np.flatnonzero(bools[:-1] != bools[1:])
-        # Get group lengths and hence the max index group
-        groupsizes = (shiftpoints[1::2] - shiftpoints[::2]).argmax()
-        # Initialize array and assign only the largest True island as True.
-        out = np.zeros_like(is_resting)
-        out[
-            shiftpoints[2 * groupsizes] : shiftpoints[2 * groupsizes + 1]
-        ] = 1
+            # Get last datapoint from longest continuous rest
+            rest_soc = pulse.socs[out][-1]
+            rest_v = pulse.vs[out][-1]
 
-        # Get last datapoint from longest continuous rest
-        rest_soc = pulse.socs[out][-1]
-        rest_v = pulse.vs[out][-1]
+        elif method == "final":
+            # Take last datapoint
+            rest_soc = pulse.socs[is_resting][-1]
+            rest_v = pulse.vs[is_resting][-1]
 
         socs[i+1] = rest_soc
         vs[i+1] = rest_v
