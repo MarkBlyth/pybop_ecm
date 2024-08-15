@@ -57,10 +57,10 @@ class ConstrainedThevenin(pybop.empirical.Thevenin):
     def _check_params(
         self,
         inputs: dict[str, float] = None,
+        parameter_set=None,
         allow_infeasible_solutions: bool = False,
     ) -> bool:
         # Check every respective R*C <= tau_bound
-
         i = 1
         if inputs is None:
             # Simulating the model will result in this being called with
