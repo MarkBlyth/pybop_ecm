@@ -51,6 +51,8 @@ def main():
         c_rate, temperature = get_conditions_from_filename(filename)
         if c_rate not in TARGET_C_RATES:
             continue
+        if temperature != 15:
+            continue
 
         filename_stem = "." + filename.split(".")[-2]
         print("Starting ", filename)
@@ -75,32 +77,30 @@ def main():
         ocv_vs = np.r_[2.49, ocv_vs, 4.21]
         ocv_func = fitter.build_ocv_interpolant(ocv_socs, ocv_vs)
 
-        pulses = datareaders.get_pulse_data(
-            df, socs, datareaders.BasytecHeaders, "charge", ignore_rests=True, skip_initial_points=2,
-        )
+        # pulses = datareaders.get_pulse_data(
+        #     df, socs, datareaders.BasytecHeaders, "charge", ignore_rests=True, skip_initial_points=2,
+        # )
 
         pars_df = fitter.parameterise(
             pulses,
             ocv_func,
             base_params,
-            initial_taus_guess=[6, 13],
+            initial_taus_guess=[10, 100],
+            sigma_r=0.001,
+            sigma_c=10,
             tau_mins=[1, 1],
-            tau_maxs=[200, 200],
-            r_bounds=[0, 1e-1],
-            c_bounds=[1e1, 1e6],
-            r_variance=1e-5,
-            c_variance=1e-2,
+            tau_maxs=[20, 200],
             initial_rs_guess=[0.005, 0.01, 0.01],
-            maxiter=1000,
             method=pybop.XNES,
+            #method="trust-constr",
             plot=True,
         )
         pars_df["Temperature_degC"] = temperature
         pars_df["Current_A"] = capacity_Ah * c_rate
         ocv_df = pd.DataFrame.from_dict({"SOC": ocv_socs, "OCV[V]": ocv_vs})
 
-        ocv_df.to_csv(str(temperature) + "degC_ocv.csv", index=False)
-        pars_df.to_csv(str(temperature) + "degC_pars.csv", index=False)
+        ocv_df.to_csv(str(temperature) + "degC_chargeocv.csv", index=False)
+        pars_df.to_csv(str(temperature) + "degC_chargepars.csv", index=False)
 
         parameter_sets.append(pars_df)
     df = pd.concat(parameter_sets)

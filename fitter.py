@@ -237,7 +237,11 @@ def fit_parameter_set(
             bounds=bounds,
         )
     else:
-        optim = pybop.Optimisation(cost, optimiser=method)
+        try:
+            optim = pybop.Optimisation(cost, optimiser=method)
+        except ValueError as e:
+            warnings.warn(f"Something went wrong: {e}")
+            return None, None, None
         optim.set_max_iterations(maxiter)
     try:
         params, finalcost = optim.run()
@@ -301,69 +305,90 @@ def parameterise(
     n_rc = len(initial_taus_guess)
     if isinstance(datasets, PulseDataset):
         datasets = [datasets]
+    if isinstance(method, str) or not hasattr(method, "__len__"):
+        methodlist = [method]
+    else:
+        methodlist = method
+    methodcounts = {m: 0 for m in methodlist}
 
     params = []
     average_socs = []
     for i, dataset in enumerate(datasets):
         initial_soc = dataset.socs[0]
+        best_cost = np.inf
+        best_pars = None
+        best_problem = None
+        best_method = None
+        for method in methodlist:
+            # TODO maybe print method / cost pairs, for validation?
+            if isinstance(method, str):
+                # Don't get model to apply constraints with constrained optimisers
+                model = get_model(
+                    initial_soc,
+                    ocv_func,
+                    base_parameters,
+                    n_rc,
+                    integrator_maxstep=integrator_maxstep,
+                )
+            else:
+                model = get_model(
+                    initial_soc,
+                    ocv_func,
+                    base_parameters,
+                    n_rc,
+                    tau_maxs,
+                    tau_mins,
+                    integrator_maxstep,
+                )
 
-        if isinstance(method, str):
-            # Don't get model to apply constraints with constrained optimisers
-            model = get_model(
-                initial_soc,
-                ocv_func,
-                base_parameters,
-                n_rc,
-                integrator_maxstep=integrator_maxstep,
+            if len(params) == 0:
+                prev_rs = initial_rs_guess
+                prev_cs = [
+                    tau / r for tau, r in zip(initial_taus_guess, initial_rs_guess[1:])
+                ]
+            else:
+                prev_rs = params[-1][::2]
+                prev_cs = params[-1][1::2]
+
+            if isinstance(method, str):
+                scipy_constraints = get_scipy_constraints(
+                    n_rc, method, tau_mins, tau_maxs, r_bounds, c_bounds
+                )
+            else:
+                scipy_constraints = None
+
+            fitting_params = get_fitting_params(
+                prev_rs, prev_cs, r_bounds, c_bounds, sigma_r, sigma_c
             )
-        else:
-            model = get_model(
-                initial_soc,
-                ocv_func,
-                base_parameters,
-                n_rc,
-                tau_maxs,
-                tau_mins,
-                integrator_maxstep,
+            fitted, problem, finalcost = fit_parameter_set(
+                dataset,
+                model,
+                fitting_params,
+                maxiter,
+                method,
+                scipy_constraints,
             )
+            if fitted is None:
+                continue
 
-        if len(params) == 0:
-            prev_rs = initial_rs_guess
-            prev_cs = [
-                tau / r for tau, r in zip(initial_taus_guess, initial_rs_guess[1:])
-            ]
-        else:
-            prev_rs = params[-1][::2]
-            prev_cs = params[-1][1::2]
+            if finalcost < best_cost:
+                best_cost = finalcost
+                best_pars = fitted
+                best_problem = problem
+                best_method = method
 
-        if isinstance(method, str):
-            scipy_constraints = get_scipy_constraints(
-                n_rc, method, tau_mins, tau_maxs, r_bounds, c_bounds
-            )
-        else:
-            scipy_constraints = None
-
-        fitting_params = get_fitting_params(
-            prev_rs, prev_cs, r_bounds, c_bounds, sigma_r, sigma_c
-        )
-        fitted, problem, finalcost = fit_parameter_set(
-            dataset,
-            model,
-            fitting_params,
-            maxiter,
-            method,
-            scipy_constraints,
-        )
-        if fitted is None:
+        if np.isinf(best_cost):
             continue
-        params.append(fitted)
+        params.append(best_pars)
         average_socs.append(np.mean(dataset.socs))
+        methodcounts[best_method] += 1
 
         if verbose:
-            print_params(fitted)
-            print(f"Final cost: {finalcost}")
+            print_params(best_pars)
+            print(f"Best method: {best_method}")
+            print(f"Final cost: {best_cost}")
         if plot:
-            pybop.quick_plot(problem, problem_inputs=fitted)
+            pybop.quick_plot(best_problem, problem_inputs=best_pars)
 
     names = ["R0"]
     for i in range(n_rc):
@@ -371,5 +396,8 @@ def parameterise(
         names.append(f"R{i+1}")
     ret_df = pd.DataFrame(params, columns=names)
     ret_df.insert(0, "SOC", average_socs)
+
+    if verbose:
+        print("Finished parameterising; best optimisation methods:\n", methodcounts)
 
     return ret_df
