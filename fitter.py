@@ -218,6 +218,7 @@ def fit_parameter_set(
     maxiter=50,
     method=pybop.XNES,
     scipy_constraints=None,
+    p=2,
 ) -> tuple[np.ndarray, pybop.FittingProblem, float]:
     dataset = pybop.Dataset(
         {
@@ -227,7 +228,7 @@ def fit_parameter_set(
         }
     )
     problem = pybop.FittingProblem(model, fitting_parameters, dataset)
-    cost = pybop.SumSquaredError(problem)
+    cost = pybop.SumSquaredError(problem) if p == 2 else pybop.Minkowski(problem, p)
     if scipy_constraints:
         constraints, bounds = scipy_constraints
         optim = pybop.SciPyMinimize(
@@ -247,7 +248,7 @@ def fit_parameter_set(
         params, finalcost = optim.run()
     except ValueError as e:
         # Typically happens when a point is requested outside of the
-        # specified bounds
+        # specified bounds; also lets us kill a single optimisation
         warnings.warn(f"Something went wrong: {e}")
         return None, None, None
     return params, problem, finalcost
@@ -294,12 +295,13 @@ def parameterise(
     c_bounds: list[float] = [0, np.inf],
     tau_mins: list[float] = None,
     tau_maxs: list[float] = None,
-    sigma_r: float = None,
-    sigma_c: float = None,
+    sigma_r: float | list[float] = None,
+    sigma_c: float | list[float] = None,
     maxiter=50,
     integrator_maxstep=None,
     method=pybop.XNES,
     verbose=True,
+    p=2,
     plot=True,
 ):
     n_rc = len(initial_taus_guess)
@@ -367,6 +369,7 @@ def parameterise(
                 maxiter,
                 method,
                 scipy_constraints,
+                p,
             )
             if fitted is None:
                 continue
