@@ -150,6 +150,29 @@ def get_model(
     return model
 
 
+def get_priors(
+    means: float | list[float], deviations: float | list[float]
+) -> list[pybop.Prior]:
+    """
+    Either a list of means, and a single standard deviation:
+        Each prior has the same SD, but its own mean
+    ...or a list of means and list of standard deviations:
+        Each prior has its own SD and mean
+    ...or deviations=None:
+        Each prior is None
+    """
+    if deviations:
+        if hasattr(deviations, "__len__"):
+            prior_list = [
+                pybop.Gaussian(mean, sd) for mean, sd in zip(means, deviations)
+            ]
+        else:
+            prior_list = [pybop.Gaussian(mean, deviations) for mean in means]
+    else:
+        prior_list = [None] * len(means)
+    return prior_list
+
+
 def get_fitting_params(
     prev_rs: list[float],
     prev_cs: list[float],
@@ -158,47 +181,36 @@ def get_fitting_params(
         1e-1,
     ],
     c_bounds: list[float] = [1e2, 1e6],
-    sigma_r: float = None,
-    sigma_c: float = None,
+    sigma_r: float | list[float] = None,
+    sigma_c: float | list[float] = None,
 ) -> list[pybop.Parameter]:
     """
     TODO check for consistency between initial taus guess, initial rs guess
     """
-    if sigma_r:
-        prior_r = pybop.Gaussian(prev_rs[0], sigma_r)
-    else:
-        prior_r = None
+    r_priors = get_priors(prev_rs, sigma_r)
+    c_priors = get_priors(prev_cs, sigma_c)
     to_fit = [
         pybop.Parameter(
             "R0 [Ohm]",
             initial_value=prev_rs[0],
-            prior=prior_r,
+            prior=r_priors[0],
             bounds=r_bounds,
         )
     ]
     for i, (prev_r, prev_c) in enumerate(zip(prev_rs[1:], prev_cs)):
-        if sigma_c:
-            prior_c = pybop.Gaussian(prev_c, sigma_c)
-        else:
-            prior_c = None
         to_fit.append(
             pybop.Parameter(
                 f"C{i+1} [F]",
                 initial_value=prev_c,
-                prior=prior_c,
+                prior=c_priors[i],
                 bounds=c_bounds,
             )
         )
-
-        if sigma_r:
-            prior_r = pybop.Gaussian(prev_r, sigma_r)
-        else:
-            prior_r = None
         to_fit.append(
             pybop.Parameter(
                 f"R{i+1} [Ohm]",
                 initial_value=prev_r,
-                prior=prior_r,
+                prior=r_priors[i + 1],
                 bounds=r_bounds,
             )
         )
